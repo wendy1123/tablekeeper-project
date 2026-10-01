@@ -1,45 +1,17 @@
 <!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tablekeeper</title></head>
-<body>
-<main>
-<h1>Tablekeeper</h1>
-<p>Check availability and reserve a table.</p>
-<form id="search">
-<label>Start <input name="start" type="datetime-local" required></label>
-<label>End <input name="end" type="datetime-local" required></label>
-<label>Party size <input name="party_size" type="number" min="1" max="20" value="2" required></label>
-<button>Find tables</button>
-</form>
+<body><main><h1>Tablekeeper</h1>
+<form id="search"><label>Start <input name="start" type="datetime-local" required></label><label>End <input name="end" type="datetime-local" required></label><label>Party size <input name="party_size" type="number" min="1" value="2" required></label><button>Find tables</button></form>
 <pre id="results"></pre>
-<form id="reserve">
-<input name="customer_name" placeholder="Name" required>
-<input name="customer_email" type="email" placeholder="Email" required>
-<input name="start" type="datetime-local" required>
-<input name="end" type="datetime-local" required>
-<input name="party_size" type="number" min="1" value="2" required>
-<input name="table_id" placeholder="Table ID" required>
-<button>Reserve</button>
-</form>
-<pre id="message"></pre>
-</main>
+<form id="reserve"><input name="customer_name" placeholder="Name" required><input name="customer_email" type="email" placeholder="Email" required><input name="start" type="datetime-local" required><input name="end" type="datetime-local" required><input name="party_size" type="number" min="1" value="2" required><input name="table_id" placeholder="Table ID" required><button>Reserve</button></form>
+<section><h2>Existing reservation</h2><input id="reservation-id" placeholder="Reservation ID"><button id="lookup">Look up</button><button id="cancel">Cancel</button><pre id="message"></pre></section>
 <script>
 const iso = value => new Date(value).toISOString();
-const search = document.querySelector("#search");
-search.addEventListener("submit", async event => {
-  event.preventDefault();
-  const data = new FormData(search);
-  const response = await fetch(`/api/availability?start=${encodeURIComponent(iso(data.get("start")))}&end=${encodeURIComponent(iso(data.get("end")))}&party_size=${data.get("party_size")}`);
-  document.querySelector("#results").textContent = JSON.stringify(await response.json(), null, 2);
-});
-document.querySelector("#reserve").addEventListener("submit", async event => {
-  event.preventDefault();
-  const data = Object.fromEntries(new FormData(event.target));
-  data.party_size = Number(data.party_size);
-  data.start = iso(data.start); data.end = iso(data.end);
-  const response = await fetch("/api/reservations", {method:"POST", headers:{"Content-Type":"application/json","Idempotency-Key":crypto.randomUUID()}, body:JSON.stringify(data)});
-  document.querySelector("#message").textContent = JSON.stringify(await response.json(), null, 2);
-});
-</script>
-</body>
-</html>
+const show = data => document.querySelector("#message").textContent = JSON.stringify(data, null, 2);
+const request = async (url, options) => { const response = await fetch(url, options); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Request failed"); return data; };
+document.querySelector("#search").addEventListener("submit", async event => { event.preventDefault(); const data = new FormData(event.target); try { document.querySelector("#results").textContent = JSON.stringify(await request(`/api/availability?start=${encodeURIComponent(iso(data.get("start")))}&end=${encodeURIComponent(iso(data.get("end")))}&party_size=${data.get("party_size")}`), null, 2); } catch (error) { document.querySelector("#results").textContent = error.message; }});
+document.querySelector("#reserve").addEventListener("submit", async event => { event.preventDefault(); const data = Object.fromEntries(new FormData(event.target)); data.party_size = Number(data.party_size); data.start = iso(data.start); data.end = iso(data.end); try { show(await request("/api/reservations", {method:"POST", headers:{"Content-Type":"application/json","Idempotency-Key":crypto.randomUUID()}, body:JSON.stringify(data)})); } catch (error) { show({error:error.message}); }});
+document.querySelector("#lookup").addEventListener("click", async () => { try { show(await request(`/api/reservations/${document.querySelector("#reservation-id").value}`)); } catch (error) { show({error:error.message}); }});
+document.querySelector("#cancel").addEventListener("click", async () => { try { show(await request(`/api/reservations/${document.querySelector("#reservation-id").value}`, {method:"DELETE", headers:{"Idempotency-Key":crypto.randomUUID()}})); } catch (error) { show({error:error.message}); }});
+</script></main></body></html>

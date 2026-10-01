@@ -1,12 +1,42 @@
 <!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tablekeeper manager</title></head>
-<body><main><h1>Manager operations</h1><button id="refresh">Refresh</button><pre id="output"></pre>
+<body><main>
+<h1>Manager operations</h1>
+<button id="refresh">Refresh</button>
+<section>
+<h2>Close a table</h2>
+<form id="closure"><input name="table_id" placeholder="Table ID" required><input name="start" type="datetime-local" required><input name="end" type="datetime-local" required><input name="reason" placeholder="Reason" required><button>Create closure</button></form>
+</section>
+<section><h2>Proposals</h2><button id="make-proposal">Create proposal for closure</button><input id="closure-id" placeholder="Closure ID"><button id="approve">Approve proposal</button><input id="proposal-id" placeholder="Proposal ID"></section>
+<pre id="output"></pre>
 <script>
+const output = document.querySelector("#output");
+const iso = value => new Date(value).toISOString();
+const read = async response => { const data = await response.json(); if (!response.ok) throw new Error(data.error || "Request failed"); return data; };
 async function refresh() {
-  const [tables, reservations, closures] = await Promise.all(["tables", "reservations", "closures"].map(name => fetch(`/api/manager/${name}`).then(response => response.json())));
-  document.querySelector("#output").textContent = JSON.stringify({tables, reservations, closures}, null, 2);
+  try {
+    const names = ["tables", "reservations", "closures", "proposals"];
+    const values = await Promise.all(names.map(name => fetch(`/api/manager/${name}`).then(read)));
+    output.textContent = JSON.stringify(Object.fromEntries(names.map((name, index) => [name, values[index]])), null, 2);
+  } catch (error) { output.textContent = error.message; }
 }
-document.querySelector("#refresh").addEventListener("click", refresh); refresh();
+document.querySelector("#refresh").addEventListener("click", refresh);
+document.querySelector("#closure").addEventListener("submit", async event => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.target));
+  data.start = iso(data.start); data.end = iso(data.end);
+  try { output.textContent = JSON.stringify(await read(await fetch("/api/manager/closures", {method:"POST", headers:{"Content-Type":"application/json","Idempotency-Key":crypto.randomUUID()}, body:JSON.stringify(data)})), null, 2); await refresh(); }
+  catch (error) { output.textContent = error.message; }
+});
+document.querySelector("#make-proposal").addEventListener("click", async () => {
+  try { output.textContent = JSON.stringify(await read(await fetch("/api/manager/proposals", {method:"POST", headers:{"Content-Type":"application/json","Idempotency-Key":crypto.randomUUID()}, body:JSON.stringify({closure_id:document.querySelector("#closure-id").value})})), null, 2); await refresh(); }
+  catch (error) { output.textContent = error.message; }
+});
+document.querySelector("#approve").addEventListener("click", async () => {
+  try { output.textContent = JSON.stringify(await read(await fetch(`/api/manager/proposals/${document.querySelector("#proposal-id").value}/approve`, {method:"POST", headers:{"Idempotency-Key":crypto.randomUUID()}})), null, 2); await refresh(); }
+  catch (error) { output.textContent = error.message; }
+});
+refresh();
 </script></main></body>
 </html>

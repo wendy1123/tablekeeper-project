@@ -22,6 +22,13 @@ class TablekeeperTests(unittest.TestCase):
         self.assertEqual(start, "2026-10-01T17:00:00+00:00")
         self.assertEqual(end, "2026-10-01T18:00:00+00:00")
 
+    def test_naive_time_uses_restaurant_timezone(self):
+        start, end = app.validate_window(
+            "2026-10-25T01:30:00", "2026-10-25T02:30:00", "Europe/London"
+        )
+        self.assertEqual(start, "2026-10-25T00:30:00+00:00")
+        self.assertEqual(end, "2026-10-25T02:30:00+00:00")
+
     def test_overlapping_reservation_is_not_available(self):
         db = app.connect()
         start = "2026-10-01T17:00:00+00:00"
@@ -48,6 +55,39 @@ class TablekeeperTests(unittest.TestCase):
         db.commit()
         tables = app.available_tables(db, "demo", start, end, 2, exclude_reservation_id="r1")
         self.assertIn("t1", [table["id"] for table in tables])
+        db.close()
+
+    def test_change_rejects_unavailable_requested_table(self):
+        db = app.connect()
+        start = "2026-10-01T17:00:00+00:00"
+        end = "2026-10-01T18:00:00+00:00"
+        db.execute("BEGIN IMMEDIATE")
+        for reservation_id, table_id in (("r1", "t1"), ("r2", "t2")):
+            db.execute(
+                "INSERT INTO reservations VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?)",
+                (reservation_id, "demo", table_id, "A", "a@example.test", 2, start, end, start, start),
+            )
+        db.commit()
+        handler = object.__new__(app.Handler)
+        with self.assertRaises(app.APIError):
+            handler.change_reservation(
+                db, "r1",
+                {"start": start, "end": end, "party_size": 2, "table_id": "t2"}, None,
+            )
+        db.close()
+
+    def test_idempotency_key_is_bound_to_payload(self):
+        db = app.connect()
+        handler = object.__new__(app.Handler)
+        handler.send_json = lambda payload, status=200: payload
+        body = {
+            "customer_name": "A", "customer_email": "a@example.test",
+            "party_size": 2, "start": "2026-10-01T17:00:00+00:00",
+            "end": "2026-10-01T18:00:00+00:00",
+        }
+        handler.create_reservation(db, body, "same-key")
+        with self.assertRaises(app.APIError):
+            handler.create_reservation(db, {**body, "customer_name": "B"}, "same-key")
         db.close()
 
     def test_cancel_is_terminal(self):

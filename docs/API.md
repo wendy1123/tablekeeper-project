@@ -13,6 +13,7 @@ timezone; values with an offset are normalized to UTC. Send an
 - `GET /api/availability?start=...&end=...&party_size=2`
 - `POST /api/reservations` with `customer_name`, `customer_email`,
   `party_size`, `start`, `end`, and optional `table_id`
+- `GET /api/reservations/{id}` to retrieve the current status and details
 - `PATCH /api/reservations/{id}` to change `start`, `end`, `party_size`, or
   `table_id`
 - `DELETE /api/reservations/{id}` to cancel
@@ -22,6 +23,7 @@ timezone; values with an offset are normalized to UTC. Send an
 - `GET /api/manager/tables`
 - `GET /api/manager/reservations`
 - `GET /api/manager/closures`
+- `GET /api/manager/proposals` and `GET /api/manager/proposals/{id}`
 - `POST /api/manager/closures` with `table_id`, `start`, `end`, and `reason`
 - `POST /api/manager/proposals` with `closure_id`
 - `POST /api/manager/proposals/{id}/approve`
@@ -29,3 +31,16 @@ timezone; values with an offset are normalized to UTC. Send an
 Proposal creation is advisory and does not mutate reservations. Approval
 re-checks every alternative in one SQLite transaction; if any alternative is
 stale, no reservation is changed.
+
+Closures are bounded windows. They affect availability only between `start` and
+`end`; creating one does not permanently change a table's status. A naive
+timestamp is interpreted in the restaurant's configured IANA timezone (the
+demo restaurant uses `Europe/London`), while an explicit offset is respected
+and normalized to UTC. Windows must be positive and no longer than 12 hours.
+
+Mutating requests should provide an `Idempotency-Key`. A retry with the same
+key, operation, and canonical payload replays the original response. Reusing a
+key for another operation or payload returns `409` rather than replaying the
+wrong result. Validation failures use a JSON `{"error": "..."}` response.
+Reservation, closure, proposal, and approval changes are recorded in
+`audit_events`.

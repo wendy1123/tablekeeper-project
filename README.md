@@ -22,6 +22,8 @@ The API stores data in SQLite (`tablekeeper.db` by default). Set `TABLEKEEPER_DB
 - Idempotency keys make retried create, change, cancel, closure, proposal, and approval requests safe.
 - Closure impact analysis is explicit; assistant proposals are draft-only until a manager approves them.
 - Approval re-checks availability and applies all changes atomically, rolling back the complete batch on conflict.
+- Closures are time-bounded and do not permanently hide a table; local naive times use the restaurant's IANA timezone.
+- Reusing an idempotency key with a different operation or payload is rejected with HTTP 409.
 
 ## API overview
 

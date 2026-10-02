@@ -13,7 +13,7 @@ python3 app.py
 
 Open <http://localhost:8000/> for the customer view and <http://localhost:8000/manager.html> for manager operations.
 
-The API stores data in SQLite (`tablekeeper.db` by default). Set `TABLEKEEPER_DB` to use a different database path, including `:memory:` for tests.
+The API stores data in SQLite (`tablekeeper.db` by default). Set `TABLEKEEPER_DB` to use a different database path, including `:memory:` for tests. Manager routes require `X-Manager-Token` (the demo token is `demo-manager-token`; set `TABLEKEEPER_MANAGER_TOKEN` to change it). Customers must send `X-Reservation-Email` when looking up or changing a reservation.
 
 ## Safety properties
 

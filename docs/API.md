@@ -18,7 +18,13 @@ timezone; values with an offset are normalized to UTC. Send an
   `table_id`
 - `DELETE /api/reservations/{id}` to cancel
 
+Reservation lookup, change, and cancellation require an `X-Reservation-Email`
+header matching the reservation email.
+
 ## Manager
+
+Manager reads and writes require an `X-Manager-Token` header. The demo token is
+`demo-manager-token`; configure `TABLEKEEPER_MANAGER_TOKEN` in deployments.
 
 - `GET /api/manager/tables`
 - `GET /api/manager/reservations`

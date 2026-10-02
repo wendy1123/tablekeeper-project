@@ -134,6 +134,39 @@ class TablekeeperTests(unittest.TestCase):
         db.rollback()
         db.close()
 
+    def test_proposal_rejects_unavailable_target_table(self):
+        db = app.connect()
+        db.execute("BEGIN IMMEDIATE")
+        db.execute(
+            "INSERT INTO closures VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("c1", "demo", "t1", "test", "2026-10-01T17:00:00+00:00", "2026-10-01T18:00:00+00:00", app.now()),
+        )
+        db.execute(
+            "INSERT INTO reservations VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?)",
+            ("r1", "demo", "t1", "A", "a@example.test", 2, "2026-10-01T17:00:00+00:00", "2026-10-01T18:00:00+00:00", app.now(), app.now()),
+        )
+        db.execute("UPDATE restaurant_tables SET status='maintenance' WHERE id='t2'")
+        db.execute(
+            "INSERT INTO proposals VALUES (?, ?, ?, 'draft', ?, NULL)",
+            ("p1", "demo", "c1", app.now()),
+        )
+        db.execute(
+            "INSERT INTO proposal_items VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("i1", "p1", "r1", "t2", "2026-10-01T17:00:00+00:00", "2026-10-01T18:00:00+00:00", "test"),
+        )
+        db.commit()
+        handler = object.__new__(app.Handler)
+        with self.assertRaises(app.APIError):
+            handler.approve_proposal(db, "p1", None)
+        self.assertEqual(db.execute("SELECT table_id FROM reservations WHERE id='r1'").fetchone()["table_id"], "t1")
+        db.close()
+
+    def test_non_object_json_body_is_rejected(self):
+        self.assertRaises(app.APIError, app.Handler.read_json, type("Request", (), {
+            "headers": {"Content-Length": "2"},
+            "rfile": type("Body", (), {"read": lambda self, length: b"[]"} )(),
+        })())
+
 
 if __name__ == "__main__":
     unittest.main()

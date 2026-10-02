@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 ROOT = Path(__file__).parent
 DB_PATH = os.environ.get("TABLEKEEPER_DB", str(ROOT / "tablekeeper.db"))
+MANAGER_TOKEN = os.environ.get("TABLEKEEPER_MANAGER_TOKEN", "demo-manager-token")
 
 
 def utc_time(value: str, default_zone: str = "UTC") -> datetime:
@@ -208,16 +209,28 @@ class Handler(BaseHTTPRequestHandler):
     def read_json(self):
         length = int(self.headers.get("Content-Length", "0"))
         try:
-            return json.loads(self.rfile.read(length) or b"{}")
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(body, dict):
+                raise APIError("request body must be a JSON object")
+            return body
         except json.JSONDecodeError as exc:
             raise APIError("request body must be valid JSON") from exc
 
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, X-Manager-Token, X-Reservation-Email")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
         self.end_headers()
+
+    def require_manager(self):
+        if self.headers.get("X-Manager-Token") != MANAGER_TOKEN:
+            raise APIError("manager authorization required", 401)
+
+    def require_reservation_owner(self, reservation):
+        email = self.headers.get("X-Reservation-Email", "").strip().lower()
+        if not email or email != reservation["customer_email"].lower():
+            raise APIError("reservation ownership verification required", 403)
 
     def do_GET(self):
         connection = connect()
@@ -247,17 +260,22 @@ class Handler(BaseHTTPRequestHandler):
                 reservation = connection.execute("SELECT * FROM reservations WHERE id=?", (path.rsplit("/", 1)[1],)).fetchone()
                 if not reservation:
                     raise APIError("reservation not found", 404)
+                self.require_reservation_owner(reservation)
                 return self.send_json({"reservation": reservation_view(reservation)})
             if path == "/api/manager/reservations":
+                self.require_manager()
                 rows = connection.execute("SELECT r.*, t.name table_name FROM reservations r JOIN restaurant_tables t ON t.id=r.table_id WHERE r.restaurant_id=? ORDER BY r.start_utc", (params.get("restaurant_id", "demo"),)).fetchall()
                 return self.send_json({"reservations": [reservation_view(r) for r in rows]})
             if path == "/api/manager/closures":
-                rows = connection.execute("SELECT c.*, t.name table_name FROM closures c JOIN restaurant_tables t ON t.id=c.table_id ORDER BY c.start_utc DESC").fetchall()
+                self.require_manager()
+                rows = connection.execute("SELECT c.*, t.name table_name FROM closures c JOIN restaurant_tables t ON t.id=c.table_id WHERE c.restaurant_id=? ORDER BY c.start_utc DESC", (params.get("restaurant_id", "demo"),)).fetchall()
                 return self.send_json({"closures": [row_dict(r) for r in rows]})
             if path == "/api/manager/proposals":
-                rows = connection.execute("SELECT * FROM proposals ORDER BY created_at DESC").fetchall()
+                self.require_manager()
+                rows = connection.execute("SELECT * FROM proposals WHERE restaurant_id=? ORDER BY created_at DESC", (params.get("restaurant_id", "demo"),)).fetchall()
                 return self.send_json({"proposals": [row_dict(r) for r in rows]})
             if path.startswith("/api/manager/proposals/"):
+                self.require_manager()
                 proposal_id = path.rsplit("/", 1)[1]
                 proposal = connection.execute("SELECT * FROM proposals WHERE id=?", (proposal_id,)).fetchone()
                 if not proposal:
@@ -265,6 +283,7 @@ class Handler(BaseHTTPRequestHandler):
                 items = connection.execute("SELECT * FROM proposal_items WHERE proposal_id=?", (proposal_id,)).fetchall()
                 return self.send_json({"proposal": row_dict(proposal), "items": [row_dict(item) for item in items]})
             if path == "/api/manager/tables":
+                self.require_manager()
                 rows = connection.execute("SELECT * FROM restaurant_tables WHERE restaurant_id=? ORDER BY id", (params.get("restaurant_id", "demo"),)).fetchall()
                 return self.send_json({"tables": [row_dict(r) for r in rows]})
             raise APIError("route not found", 404)
@@ -285,10 +304,13 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/reservations":
                 return self.create_reservation(connection, body, key)
             if path == "/api/manager/closures":
+                self.require_manager()
                 return self.create_closure(connection, body, key)
             if path == "/api/manager/proposals":
+                self.require_manager()
                 return self.create_proposal(connection, body, key)
             if path.startswith("/api/manager/proposals/") and path.endswith("/approve"):
+                self.require_manager()
                 return self.approve_proposal(connection, path.split("/")[4], key)
             raise APIError("route not found", 404)
         except sqlite3.IntegrityError as exc:
@@ -306,6 +328,10 @@ class Handler(BaseHTTPRequestHandler):
             path = self.path.split("?", 1)[0]
             body = self.read_json()
             if path.startswith("/api/reservations/"):
+                reservation = connection.execute("SELECT * FROM reservations WHERE id=?", (path.rsplit("/", 1)[1],)).fetchone()
+                if not reservation:
+                    raise APIError("reservation not found", 404)
+                self.require_reservation_owner(reservation)
                 return self.change_reservation(connection, path.rsplit("/", 1)[1], body, self.headers.get("Idempotency-Key"))
             raise APIError("route not found", 404)
         except (APIError, KeyError, ValueError) as exc:
@@ -319,6 +345,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             path = self.path.split("?", 1)[0]
             if path.startswith("/api/reservations/"):
+                reservation = connection.execute("SELECT * FROM reservations WHERE id=?", (path.rsplit("/", 1)[1],)).fetchone()
+                if not reservation:
+                    raise APIError("reservation not found", 404)
+                self.require_reservation_owner(reservation)
                 return self.cancel_reservation(connection, path.rsplit("/", 1)[1], self.headers.get("Idempotency-Key"))
             raise APIError("route not found", 404)
         except (APIError, KeyError, ValueError) as exc:
@@ -447,7 +477,7 @@ class Handler(BaseHTTPRequestHandler):
                 reservation = db.execute("SELECT * FROM reservations WHERE id=?", (item["reservation_id"],)).fetchone()
                 closure = db.execute("SELECT * FROM closures WHERE id=?", (proposal["closure_id"],)).fetchone()
                 target = db.execute("SELECT * FROM restaurant_tables WHERE id=? AND restaurant_id=?", (item["new_table_id"], proposal["restaurant_id"])).fetchone()
-                if not reservation or reservation["status"] != "confirmed" or not closure or reservation["table_id"] != closure["table_id"] or not target or target["capacity"] < reservation["party_size"]:
+                if not reservation or reservation["status"] != "confirmed" or not closure or reservation["table_id"] != closure["table_id"] or not target or target["status"] != "available" or target["capacity"] < reservation["party_size"]:
                     raise APIError("proposal is stale; reservation or closure changed", 409)
                 if reservation["start_utc"] != item["new_start_utc"] or reservation["end_utc"] != item["new_end_utc"]:
                     raise APIError("proposal is stale; reservation time changed", 409)

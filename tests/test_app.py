@@ -295,11 +295,24 @@ class TablekeeperTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    def test_customer_and_manager_pages_expose_complete_workflows(self):
+        customer = (app.ROOT / "index.html").read_text(encoding="utf-8")
+        manager = (app.ROOT / "manager.html").read_text(encoding="utf-8")
+        for marker in ("X-Reservation-Email", "PATCH", "DELETE", "change-table", "showReservation"):
+            self.assertIn(marker, customer)
+        for marker in ("X-Manager-Token", "/reject", "Review changes", "rules-based"):
+            self.assertIn(marker, manager)
+
     def test_non_object_json_body_is_rejected(self):
-        self.assertRaises(app.APIError, app.Handler.read_json, type("Request", (), {
-            "headers": {"Content-Length": "2"},
-            "rfile": type("Body", (), {"read": lambda self, length: b"[]"} )(),
-        })())
+        for payload in (b"[]", b"null", b'"text"', b"42"):
+            with self.subTest(payload=payload):
+                request = type("Request", (), {
+                    "headers": {"Content-Length": str(len(payload))},
+                    "rfile": type("Body", (), {"read": lambda self, length, payload=payload: payload})(),
+                })()
+                with self.assertRaises(app.APIError) as context:
+                    app.Handler.read_json(request)
+                self.assertEqual(context.exception.status, 400)
 
     def test_proposal_detail_is_scoped_to_restaurant(self):
         db = app.connect()

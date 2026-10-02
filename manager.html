@@ -2,7 +2,7 @@
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tablekeeper manager</title>
 <style>body{font:16px system-ui;max-width:1000px;margin:2rem auto;padding:0 1rem}form,section{border:1px solid #ddd;border-radius:8px;padding:1rem;margin:1rem 0}label,input,button{margin:.35rem;padding:.4rem}.card{border:1px solid #bbb;border-radius:6px;padding:.7rem;margin:.5rem 0}.danger{color:#a00}#output{white-space:pre-wrap}</style></head>
-<body><main><h1>Manager operations</h1><label>Manager token <input id="token" value="demo-manager-token"></label><button id="refresh">Refresh</button>
+<body><main><h1>Manager operations</h1><p><strong>Demo only:</strong> use the configured manager token. Change <code>TABLEKEEPER_MANAGER_TOKEN</code> before deployment.</p><label>Manager token <input id="token" type="password" placeholder="demo-manager-token" autocomplete="current-password"></label><button id="refresh">Refresh</button>
 <section><h2>Close a table</h2><form id="closure"><input name="table_id" placeholder="Table ID" required><input name="start" type="datetime-local" required><input name="end" type="datetime-local" required><input name="reason" placeholder="Reason" required><button>Create closure</button></form></section>
 <section><h2>Draft a proposal</h2><p>The assistant is rules-based: it suggests capacity-fitting alternatives for manager approval.</p><label>Closure <select id="closure-id"></select></label><button id="make-proposal">Create proposal</button><div id="proposals"></div></section><pre id="output"></pre>
 <script>

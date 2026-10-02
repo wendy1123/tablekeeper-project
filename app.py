@@ -211,7 +211,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
             if not isinstance(body, dict):
-                raise APIError("request body must be a JSON object")
+                raise APIError("request body must be a JSON object", 400)
             return body
         except json.JSONDecodeError as exc:
             raise APIError("request body must be valid JSON") from exc

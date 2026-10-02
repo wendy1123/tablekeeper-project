@@ -23,6 +23,7 @@ The API stores data in SQLite (`tablekeeper.db` by default). Set `TABLEKEEPER_DB
 - Closure impact analysis is explicit; assistant proposals are draft-only until a manager approves them.
 - Approval re-checks availability and applies all changes atomically, rolling back the complete batch on conflict.
 - The manager can explicitly reject a draft proposal; the rules-based assistant never mutates reservations without approval.
+- Smart Forecast provides read-only, explainable warnings for table pressure, party capacity, and upcoming closure impacts; it never moves or approves reservations.
 - Closures are time-bounded and do not permanently hide a table; local naive times use the restaurant's IANA timezone.
 - Reusing an idempotency key with a different operation or payload is rejected with HTTP 409.
 

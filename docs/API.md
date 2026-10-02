@@ -30,6 +30,7 @@ Manager reads and writes require an `X-Manager-Token` header. The demo token is
 - `GET /api/manager/reservations`
 - `GET /api/manager/closures`
 - `GET /api/manager/proposals` and `GET /api/manager/proposals/{id}`
+- `GET /api/manager/forecast` for read-only near-term operational risk analysis
 - `POST /api/manager/closures` with `table_id`, `start`, `end`, and `reason`
 - `POST /api/manager/proposals` with `closure_id`
 - `POST /api/manager/proposals/{id}/approve`
@@ -40,6 +41,11 @@ re-checks every alternative in one SQLite transaction; if any alternative is
 stale, no reservation is changed.
 Managers can reject a draft proposal explicitly; rejection never changes
 reservations.
+
+Smart Forecast reviews confirmed reservations in the next seven days and
+reports potential table pressure, party-capacity risks, and upcoming closure
+impacts. It reuses availability checks to suggest an alternative when one is
+safe, but it never changes reservations or proposals.
 
 Closures are bounded windows. They affect availability only between `start` and
 `end`; creating one does not permanently change a table's status. A naive

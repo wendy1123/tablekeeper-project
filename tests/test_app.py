@@ -20,10 +20,96 @@ class TablekeeperTests(unittest.TestCase):
         app.DB_PATH = self.old_path
         os.unlink(self.database.name)
 
+    def add_reservation(self, db, reservation_id, table_id="t1", party_size=2,
+                        start="2099-10-01T17:00:00+00:00",
+                        end="2099-10-01T18:00:00+00:00"):
+        db.execute(
+            "INSERT INTO reservations VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?)",
+            (reservation_id, "demo", table_id, "Guest", f"{reservation_id}@example.test",
+             party_size, start, end, app.now(), app.now()),
+        )
+
     def test_timezone_normalization(self):
         start, end = app.validate_window("2026-10-01T19:00:00+02:00", "2026-10-01T20:00:00+02:00")
         self.assertEqual(start, "2026-10-01T17:00:00+00:00")
         self.assertEqual(end, "2026-10-01T18:00:00+00:00")
+
+    def test_smart_forecast_no_risk(self):
+        db = app.connect()
+        forecast = app.smart_forecast(db, horizon_hours=1000000)
+        self.assertEqual(forecast["risks"], [])
+        db.close()
+
+    def test_smart_forecast_detects_table_pressure(self):
+        db = app.connect()
+        for index, table_id in enumerate(("t1", "t2", "t3", "t4"), 1):
+            self.add_reservation(db, f"pressure-{index}", table_id)
+        db.execute("UPDATE restaurant_tables SET status='maintenance' WHERE id='t4'")
+        forecast = app.smart_forecast(db, horizon_hours=1000000)
+        risk = next(r for r in forecast["risks"] if r["type"] == "table_pressure")
+        self.assertEqual(risk["reservation_count"], 4)
+        self.assertEqual(risk["usable_table_count"], 3)
+        self.assertEqual(len(risk["reservation_ids"]), 4)
+        db.close()
+
+    def test_smart_forecast_detects_party_capacity_risk(self):
+        db = app.connect()
+        self.add_reservation(db, "large-party", "t3", party_size=8)
+        risks = app.smart_forecast(db, horizon_hours=1000000)["risks"]
+        risk = next(r for r in risks if r["type"] == "party_capacity")
+        self.assertEqual(risk["reservation_ids"], ["large-party"])
+        self.assertIn("party of 8", risk["explanation"])
+        db.close()
+
+    def test_smart_forecast_reports_closure_and_safe_alternative(self):
+        db = app.connect()
+        self.add_reservation(db, "closure-affected")
+        db.execute(
+            "INSERT INTO closures VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("closure-1", "demo", "t1", "Maintenance",
+             "2099-10-01T17:00:00+00:00", "2099-10-01T18:00:00+00:00", app.now()),
+        )
+        risks = app.smart_forecast(db, horizon_hours=1000000)["risks"]
+        risk = next(r for r in risks if r["type"] == "closure_impact")
+        self.assertTrue(risk["alternative_available"])
+        self.assertEqual(risk["suggested_action"]["table_id"], "t2")
+        db.close()
+
+    def test_smart_forecast_reports_closure_without_alternative(self):
+        db = app.connect()
+        self.add_reservation(db, "no-alternative")
+        db.execute(
+            "INSERT INTO closures VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("closure-1", "demo", "t1", "Maintenance",
+             "2099-10-01T17:00:00+00:00", "2099-10-01T18:00:00+00:00", app.now()),
+        )
+        db.execute("UPDATE restaurant_tables SET status='maintenance' WHERE id IN ('t2', 't3', 't4')")
+        risk = next(r for r in app.smart_forecast(db, horizon_hours=1000000)["risks"] if r["type"] == "closure_impact")
+        self.assertFalse(risk["alternative_available"])
+        self.assertIsNone(risk["suggested_action"])
+        db.close()
+
+    def test_smart_forecast_ignores_closures_without_affected_reservations(self):
+        db = app.connect()
+        db.execute(
+            "INSERT INTO closures VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("closure-1", "demo", "t1", "Maintenance",
+             "2099-10-01T17:00:00+00:00", "2099-10-01T18:00:00+00:00", app.now()),
+        )
+        self.assertEqual(
+            [r for r in app.smart_forecast(db, horizon_hours=1000000)["risks"] if r["type"] == "closure_impact"],
+            [],
+        )
+        db.close()
+
+    def test_smart_forecast_does_not_modify_reservations(self):
+        db = app.connect()
+        self.add_reservation(db, "unchanged")
+        before = [tuple(row) for row in db.execute("SELECT * FROM reservations")]
+        app.smart_forecast(db, horizon_hours=1000000)
+        after = [tuple(row) for row in db.execute("SELECT * FROM reservations")]
+        self.assertEqual(after, before)
+        db.close()
 
     def test_naive_time_uses_restaurant_timezone(self):
         start, end = app.validate_window(
@@ -290,6 +376,14 @@ class TablekeeperTests(unittest.TestCase):
             )
             self.assertEqual(status, 200)
             self.assertEqual(cancelled["reservation"]["status"], "cancelled")
+            status, _, _ = request("GET", "/api/manager/forecast")
+            self.assertEqual(status, 401)
+            status, _, forecast = request(
+                "GET", "/api/manager/forecast",
+                headers={"X-Manager-Token": "demo-manager-token"},
+            )
+            self.assertEqual(status, 200)
+            self.assertIn("risks", forecast)
         finally:
             server.shutdown()
             server.server_close()

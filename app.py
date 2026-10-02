@@ -186,6 +186,124 @@ def reservation_view(row):
     return result
 
 
+def smart_forecast(connection, restaurant_id="demo", horizon_hours=168):
+    """Return explainable, read-only warnings for the near-term schedule."""
+    horizon_start = datetime.now(timezone.utc)
+    horizon_end = horizon_start + timedelta(hours=horizon_hours)
+    reservations = connection.execute(
+        """SELECT r.*, t.name table_name FROM reservations r
+        JOIN restaurant_tables t ON t.id=r.table_id
+        WHERE r.restaurant_id=? AND r.status='confirmed'
+          AND r.start_utc >= ? AND r.start_utc < ?
+        ORDER BY r.start_utc, r.id""",
+        (restaurant_id, horizon_start.isoformat(), horizon_end.isoformat()),
+    ).fetchall()
+    tables = connection.execute(
+        "SELECT * FROM restaurant_tables WHERE restaurant_id=? AND status='available'",
+        (restaurant_id,),
+    ).fetchall()
+    risks = []
+    windows = {}
+    for reservation in reservations:
+        window = (reservation["start_utc"], reservation["end_utc"])
+        windows.setdefault(window, []).append(reservation)
+        start, end = reservation["start_utc"], reservation["end_utc"]
+        alternatives = available_tables(
+            connection, restaurant_id, start, end, reservation["party_size"],
+            exclude_reservation_id=reservation["id"],
+        )
+        if not alternatives:
+            risks.append({
+                "type": "party_capacity",
+                "level": "attention",
+                "title": "Potential capacity risk",
+                "start": iso(start),
+                "end": iso(end),
+                "reservation_ids": [reservation["id"]],
+                "explanation": (
+                    f"No currently available single table can accommodate "
+                    f"this party of {reservation['party_size']}."
+                ),
+                "suggested_action": None,
+            })
+    for (start, end), window_reservations in windows.items():
+        usable_tables = [
+            table for table in tables
+            if not connection.execute(
+                "SELECT 1 FROM closures WHERE table_id=? AND start_utc < ? AND end_utc > ?",
+                (table["id"], end, start),
+            ).fetchone()
+        ]
+        if len(window_reservations) > len(usable_tables):
+            risks.append({
+                "type": "table_pressure",
+                "level": "attention",
+                "title": "Potential table shortage",
+                "start": iso(start),
+                "end": iso(end),
+                "reservation_ids": [row["id"] for row in window_reservations],
+                "reservation_count": len(window_reservations),
+                "usable_table_count": len(usable_tables),
+                "explanation": (
+                    f"{len(window_reservations)} confirmed reservations share "
+                    f"this window, while {len(usable_tables)} tables are usable "
+                    "after current table status and closures are considered."
+                ),
+                "suggested_action": None,
+            })
+    for closure in connection.execute(
+        """SELECT c.*, t.name table_name FROM closures c
+        JOIN restaurant_tables t ON t.id=c.table_id
+        WHERE c.restaurant_id=? AND c.end_utc >= ? AND c.start_utc < ?
+        ORDER BY c.start_utc""",
+        (restaurant_id, horizon_start.isoformat(), horizon_end.isoformat()),
+    ):
+        affected = connection.execute(
+            """SELECT r.* FROM reservations r
+            WHERE r.restaurant_id=? AND r.table_id=? AND r.status='confirmed'
+              AND r.start_utc < ? AND r.end_utc > ?
+              AND r.start_utc >= ? AND r.start_utc < ?""",
+            (
+                restaurant_id, closure["table_id"], closure["end_utc"],
+                closure["start_utc"], horizon_start.isoformat(),
+                horizon_end.isoformat(),
+            ),
+        ).fetchall()
+        for reservation in affected:
+            alternatives = available_tables(
+                connection, restaurant_id, reservation["start_utc"],
+                reservation["end_utc"], reservation["party_size"],
+                exclude_reservation_id=reservation["id"],
+            )
+            suggestion = None
+            if alternatives:
+                suggestion = {
+                    "table_id": alternatives[0]["id"],
+                    "table_name": alternatives[0]["name"],
+                    "explanation": (
+                        f"{alternatives[0]['name']} fits {reservation['party_size']} "
+                        "guests and has no overlapping reservation or closure."
+                    ),
+                }
+            risks.append({
+                "type": "closure_impact",
+                "level": "risk" if suggestion is None else "attention",
+                "title": "Upcoming closure may affect reservation",
+                "start": iso(closure["start_utc"]),
+                "end": iso(closure["end_utc"]),
+                "reservation_ids": [reservation["id"]],
+                "closure_table_id": closure["table_id"],
+                "closure_table_name": closure["table_name"],
+                "alternative_available": suggestion is not None,
+                "suggested_action": suggestion,
+                "explanation": (
+                    f"{closure['table_name']} is closed during the reservation "
+                    "window; review the reservation before the closure begins."
+                ),
+            })
+    return {"risks": risks, "horizon_start": horizon_start.isoformat(), "horizon_end": horizon_end.isoformat()}
+
+
 class APIError(Exception):
     def __init__(self, message, status=400):
         self.message, self.status = message, status
@@ -295,6 +413,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.require_manager()
                 rows = connection.execute("SELECT * FROM restaurant_tables WHERE restaurant_id=? ORDER BY id", (params.get("restaurant_id", "demo"),)).fetchall()
                 return self.send_json({"tables": [row_dict(r) for r in rows]})
+            if path == "/api/manager/forecast":
+                self.require_manager()
+                return self.send_json(smart_forecast(connection, params.get("restaurant_id", "demo")))
             raise APIError("route not found", 404)
         except sqlite3.IntegrityError:
             connection.rollback()

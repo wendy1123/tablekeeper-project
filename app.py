@@ -277,10 +277,19 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/manager/proposals/"):
                 self.require_manager()
                 proposal_id = path.rsplit("/", 1)[1]
-                proposal = connection.execute("SELECT * FROM proposals WHERE id=?", (proposal_id,)).fetchone()
+                proposal = connection.execute(
+                    "SELECT * FROM proposals WHERE id=? AND restaurant_id=?",
+                    (proposal_id, params.get("restaurant_id", "demo")),
+                ).fetchone()
                 if not proposal:
                     raise APIError("proposal not found", 404)
-                items = connection.execute("SELECT * FROM proposal_items WHERE proposal_id=?", (proposal_id,)).fetchall()
+                items = connection.execute(
+                    """SELECT i.*, r.table_id old_table_id, r.start_utc old_start_utc,
+                    r.end_utc old_end_utc FROM proposal_items i
+                    JOIN reservations r ON r.id=i.reservation_id
+                    WHERE i.proposal_id=?""",
+                    (proposal_id,),
+                ).fetchall()
                 return self.send_json({"proposal": row_dict(proposal), "items": [row_dict(item) for item in items]})
             if path == "/api/manager/tables":
                 self.require_manager()

@@ -167,6 +167,24 @@ class TablekeeperTests(unittest.TestCase):
             "rfile": type("Body", (), {"read": lambda self, length: b"[]"} )(),
         })())
 
+    def test_proposal_detail_is_scoped_to_restaurant(self):
+        db = app.connect()
+        db.execute("BEGIN IMMEDIATE")
+        db.execute("INSERT INTO restaurants VALUES (?, ?, ?)", ("other", "Other", "UTC"))
+        db.execute("INSERT INTO restaurant_tables VALUES (?, ?, ?, ?, 'available')", ("other-t1", "other", "Other table", 2))
+        db.execute(
+            "INSERT INTO closures VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("c-other", "other", "other-t1", "test", "2026-10-01T17:00:00+00:00", "2026-10-01T18:00:00+00:00", app.now()),
+        )
+        db.execute("INSERT INTO proposals VALUES (?, ?, ?, 'draft', ?, NULL)", ("p-other", "other", "c-other", app.now()))
+        db.commit()
+        proposal = db.execute(
+            "SELECT * FROM proposals WHERE id=? AND restaurant_id=?",
+            ("p-other", "demo"),
+        ).fetchone()
+        self.assertIsNone(proposal)
+        db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

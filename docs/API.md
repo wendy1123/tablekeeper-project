@@ -33,10 +33,13 @@ Manager reads and writes require an `X-Manager-Token` header. The demo token is
 - `POST /api/manager/closures` with `table_id`, `start`, `end`, and `reason`
 - `POST /api/manager/proposals` with `closure_id`
 - `POST /api/manager/proposals/{id}/approve`
+- `POST /api/manager/proposals/{id}/reject`
 
 Proposal creation is advisory and does not mutate reservations. Approval
 re-checks every alternative in one SQLite transaction; if any alternative is
 stale, no reservation is changed.
+Managers can reject a draft proposal explicitly; rejection never changes
+reservations.
 
 Closures are bounded windows. They affect availability only between `start` and
 `end`; creating one does not permanently change a table's status. A naive
@@ -48,5 +51,5 @@ Mutating requests should provide an `Idempotency-Key`. A retry with the same
 key, operation, and canonical payload replays the original response. Reusing a
 key for another operation or payload returns `409` rather than replaying the
 wrong result. Validation failures use a JSON `{"error": "..."}` response.
-Reservation, closure, proposal, and approval changes are recorded in
+Reservation, closure, proposal, approval, and rejection changes are recorded in
 `audit_events`.

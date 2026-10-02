@@ -321,6 +321,9 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/manager/proposals/") and path.endswith("/approve"):
                 self.require_manager()
                 return self.approve_proposal(connection, path.split("/")[4], key)
+            if path.startswith("/api/manager/proposals/") and path.endswith("/reject"):
+                self.require_manager()
+                return self.reject_proposal(connection, path.split("/")[4], key)
             raise APIError("route not found", 404)
         except sqlite3.IntegrityError as exc:
             connection.rollback()
@@ -515,6 +518,28 @@ class Handler(BaseHTTPRequestHandler):
                        (str(uuid.uuid4()), proposal_id, json.dumps({"proposal_id": proposal_id}), now()))
             return {"proposal_id": proposal_id, "status": "approved", "updated_reservations": len(items)}
         return self.send_json(idempotent(db, key, "proposal.approve", {"proposal_id": proposal_id}, action))
+
+    def reject_proposal(self, db, proposal_id, key):
+        def action():
+            proposal = db.execute(
+                "SELECT * FROM proposals WHERE id=? AND status='draft'", (proposal_id,)
+            ).fetchone()
+            if not proposal:
+                raise APIError("draft proposal not found or already processed", 409)
+            timestamp = now()
+            db.execute(
+                "UPDATE proposals SET status='rejected', approved_at=? WHERE id=?",
+                (timestamp, proposal_id),
+            )
+            db.execute(
+                "INSERT INTO audit_events VALUES (?, 'proposal.rejected', ?, ?, ?)",
+                (str(uuid.uuid4()), proposal_id, json.dumps({"proposal_id": proposal_id}), timestamp),
+            )
+            return {"proposal_id": proposal_id, "status": "rejected"}
+
+        return self.send_json(
+            idempotent(db, key, "proposal.reject", {"proposal_id": proposal_id}, action)
+        )
 
 
 def serve(port=8000):

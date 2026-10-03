@@ -59,9 +59,10 @@ const revealObserver=new IntersectionObserver(entries=>entries.forEach(entry=>{i
 document.querySelectorAll(".journey,.confirm,.lifecycle").forEach(section=>revealObserver.observe(section));
 const arrival=document.querySelector("#arrival-scene");let scrollFrame=0;
 const clamp=(value,min=0,max=1)=>Math.min(Math.max(value,min),max);
-const updateStoryProgress=()=>{scrollFrame=0;const range=Math.max(arrival.offsetHeight-window.innerHeight,1);const progress=clamp(-arrival.getBoundingClientRect().top/range);arrival.style.setProperty("--story",progress.toFixed(4));document.documentElement.style.setProperty("--story-progress",progress.toFixed(4));};
-window.addEventListener("scroll",()=>{if(!scrollFrame)scrollFrame=requestAnimationFrame(updateStoryProgress)},{passive:true});window.addEventListener("resize",updateStoryProgress);updateStoryProgress();
+const updateStoryProgress=()=>{const range=Math.max(arrival.offsetHeight-window.innerHeight,1);const progress=clamp(-arrival.getBoundingClientRect().top/range);arrival.style.setProperty("--story",progress.toFixed(4));};
 const storyRail=document.querySelector("#story-rail"),storyPanels=[...document.querySelectorAll(".scene-panel")];
 const updateSceneTimeline=()=>{const railStart=storyRail.getBoundingClientRect().top+window.scrollY,railRange=Math.max(storyRail.offsetHeight-window.innerHeight,1),progress=clamp((window.scrollY-railStart)/railRange);storyRail.style.setProperty("--scene-progress",progress.toFixed(4));storyPanels.forEach((panel,index)=>{const start=index/(storyPanels.length),end=(index+1)/storyPanels.length;panel.style.setProperty("--scene-progress",progress.toFixed(4));panel.classList.toggle("active",progress>=start-.06&&progress<=end+.06)})};
-window.addEventListener("scroll",()=>{if(!scrollFrame)scrollFrame=requestAnimationFrame(()=>{updateStoryProgress();updateSceneTimeline();scrollFrame=0})},{passive:true});window.addEventListener("resize",updateSceneTimeline);updateSceneTimeline();
+const updateScrollScenes=()=>{scrollFrame=0;updateStoryProgress();updateSceneTimeline();};
+const scheduleScrollScenes=()=>{if(!scrollFrame)scrollFrame=requestAnimationFrame(updateScrollScenes)};
+window.addEventListener("scroll",scheduleScrollScenes,{passive:true});window.addEventListener("resize",scheduleScrollScenes);scheduleScrollScenes();
 </script></body></html>

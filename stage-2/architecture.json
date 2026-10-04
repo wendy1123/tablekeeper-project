@@ -1,0 +1,41 @@
+{
+  "kind": "layered",
+  "title": "Tablekeeper reservation and operations flow",
+  "layers": [
+    {
+      "id": "customer_ui",
+      "title": "Customer UI",
+      "items": [
+        { "id": "customer_page", "label": "Customer reservation page" }
+      ]
+    },
+    {
+      "id": "manager_ui",
+      "title": "Manager UI",
+      "items": [
+        { "id": "manager_page", "label": "Manager operations page" }
+      ]
+    },
+    {
+      "id": "api",
+      "title": "Application API",
+      "items": [
+        { "id": "reservation_api", "label": "Reservation and availability API" },
+        { "id": "operations_api", "label": "Closure, proposal, and approval API" }
+      ]
+    },
+    {
+      "id": "storage",
+      "title": "SQLite storage",
+      "items": [
+        { "id": "reservation_store", "label": "Reservations and idempotency records" },
+        { "id": "operations_store", "label": "Tables, closures, proposals, and audit events" }
+      ]
+    }
+  ],
+  "flows": [
+    { "from": "customer_ui", "to": "api", "label": "JSON over HTTP" },
+    { "from": "manager_ui", "to": "api", "label": "JSON over HTTP" },
+    { "from": "api", "to": "storage", "label": "Transactional SQL" }
+  ]
+}

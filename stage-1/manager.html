@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tablekeeper manager</title></head>
+<body><main><h1>Manager operations</h1><button id="refresh">Refresh</button><pre id="output"></pre>
+<script>
+async function refresh() {
+  const [tables, reservations, closures] = await Promise.all(["tables", "reservations", "closures"].map(name => fetch(`/api/manager/${name}`).then(response => response.json())));
+  document.querySelector("#output").textContent = JSON.stringify({tables, reservations, closures}, null, 2);
+}
+document.querySelector("#refresh").addEventListener("click", refresh); refresh();
+</script></main></body>
+</html>

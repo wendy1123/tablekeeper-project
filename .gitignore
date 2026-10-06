@@ -1,3 +1,4 @@
 __pycache__/
-*.py[cod]
-tablekeeper.db
+*.pyc
+*.db
+.DS_Store

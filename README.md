@@ -1,6 +1,6 @@
 # Tablekeeper
 
-Tablekeeper is a full-stack restaurant reservation system for the WeAreDevelopers × BAND Dark Factory hackathon. It combines customer reservations and manager operations with an approval-gated assistant for handling reservations affected by table closures.
+Tablekeeper is a full-stack restaurant reservation system. It combines customer reservations and manager operations with an approval-gated assistant for handling reservations affected by table closures.
 
 ## Development
 
